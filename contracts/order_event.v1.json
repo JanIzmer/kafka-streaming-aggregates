@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/JanIzmer/kafka-streaming-aggregates/contracts/order_event.v1.json",
+  "title": "order_event",
+  "version": 1,
+  "description": "An order transitioning state in the checkout service. Produced to topic orders.v1.",
+  "type": "object",
+  "additionalProperties": true,
+
+  "x-contract": {
+    "topic": "orders.v1",
+    "key": "merchant_id",
+    "key_rationale": "Partitioning by merchant keeps every event for one aggregation key on one partition, so a single consumer instance owns the whole window for that key and no cross-partition coordination is needed.",
+    "partitions": 6,
+    "retention_hours": 168,
+    "compatibility": "backward",
+    "producer": "checkout-service",
+    "consumers": ["orders-aggregator-v1"],
+    "ordering_guarantee": "per partition, i.e. per merchant_id - NOT global",
+    "delivery_guarantee": "at-least-once from the producer; duplicates are expected and are the consumer's problem",
+    "expected_lateness_p99_seconds": 120,
+    "allowed_lateness_seconds": 300
+  },
+
+  "required": ["event_id", "event_type", "occurred_at", "order_id", "merchant_id"],
+
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique per logical event. A retry of the same event MUST reuse this id - it is the deduplication key."
+    },
+    "event_type": {
+      "type": "string",
+      "enum": ["order_placed", "order_paid", "order_cancelled", "order_refunded"]
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Event time, set by the producer, UTC. This is what windows are built from - never the time we received it."
+    },
+    "ingested_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Optional producer-side send time. Used only to measure lateness, never to assign windows."
+    },
+    "order_id": {"type": "string"},
+    "merchant_id": {
+      "type": "string",
+      "description": "Partition key and aggregation key."
+    },
+    "user_id": {"type": ["string", "null"]},
+    "amount_minor": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 100000000,
+      "description": "Amount in minor units (cents). Integer on purpose: floats do not sum reproducibly."
+    },
+    "currency": {
+      "type": ["string", "null"],
+      "pattern": "^[A-Z]{3}$"
+    },
+    "payment_method": {"type": ["string", "null"]},
+    "schema_version": {"type": "integer", "const": 1}
+  }
+}
