@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     # never close. After this long with no events, the watermark advances on
     # wall clock instead.
     watermark_idle_seconds: int = Field(default=30, ge=1)
+    # An event claiming to be further in the future than this has a broken
+    # producer clock. Accepting it would drag the watermark forward and close
+    # every window in between, permanently.
+    max_future_skew_seconds: int = Field(default=60, ge=0)
 
     # --- throughput / durability tradeoff ---------------------------------
     flush_interval_seconds: float = Field(default=5.0, gt=0)
