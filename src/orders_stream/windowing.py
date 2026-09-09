@@ -44,14 +44,82 @@ class Outcome(StrEnum):
     FUTURE_SKEW = "future_skew"
 
 
+ADDITIVE_FIELDS = (
+    "events_total",
+    "orders_placed",
+    "orders_paid",
+    "orders_cancelled",
+    "orders_refunded",
+    "gross_amount_minor",
+    "refunded_amount_minor",
+    "late_events_applied",
+)
+
+
+@dataclass
+class WindowDelta:
+    """What changed in one window since the last successful flush.
+
+    The sink upserts *deltas*, not absolute totals, for one reason: after a
+    restart the in-memory state of a still-open window is gone. Writing
+    absolute totals would then overwrite the rows already in Postgres with a
+    partial count. Adding deltas is safe because deduplication guarantees an
+    event is only ever applied once.
+    """
+
+    key: WindowKey
+    window_end: datetime
+    events_total: int = 0
+    orders_placed: int = 0
+    orders_paid: int = 0
+    orders_cancelled: int = 0
+    orders_refunded: int = 0
+    gross_amount_minor: int = 0
+    refunded_amount_minor: int = 0
+    late_events_applied: int = 0
+    distinct_users: int = 0
+    first_event_at: datetime | None = None
+    last_event_at: datetime | None = None
+    is_closed: bool = False
+
+    @property
+    def is_empty(self) -> bool:
+        return all(getattr(self, name) == 0 for name in ADDITIVE_FIELDS)
+
+
 @dataclass
 class WindowState:
     aggregate: Aggregate
     users: set[str] = field(default_factory=set)
     dirty: bool = True
+    # Absolute totals as of the last successful flush, so the delta is simply
+    # the difference. Kept rather than a running "pending" counter because a
+    # failed flush must not lose the changes it tried to write.
+    flushed: dict[str, int] = field(default_factory=dict)
 
     def touch(self) -> None:
         self.dirty = True
+
+    def delta(self, key: WindowKey) -> WindowDelta:
+        current = self.aggregate
+        return WindowDelta(
+            key=key,
+            window_end=current.window_end,
+            first_event_at=current.first_event_at,
+            last_event_at=current.last_event_at,
+            distinct_users=len(self.users),
+            is_closed=current.is_closed,
+            **{
+                name: getattr(current, name) - self.flushed.get(name, 0)
+                for name in ADDITIVE_FIELDS
+            },
+        )
+
+    def snapshot(self) -> None:
+        """Record what has been persisted. Called only after the transaction
+        commits - snapshotting earlier would silently drop a failed flush."""
+        self.flushed = {name: getattr(self.aggregate, name) for name in ADDITIVE_FIELDS}
+        self.dirty = False
 
 
 @dataclass
@@ -209,14 +277,21 @@ class WindowManager:
         """
         return [state.aggregate for state in self.windows.values() if state.dirty]
 
+    def pending_deltas(self) -> list[WindowDelta]:
+        """What to send to the sink: one delta per changed window."""
+        deltas = [
+            state.delta(key) for key, state in self.windows.items() if state.dirty
+        ]
+        return [delta for delta in deltas if not delta.is_empty or delta.is_closed]
+
     def mark_flushed(self, keys: list[WindowKey] | None = None) -> None:
         targets = keys if keys is not None else list(self.windows)
         for key in targets:
             state = self.windows.get(key)
             if state is not None:
-                state.dirty = False
+                state.snapshot()
 
-    def close_expired(self) -> list[Aggregate]:
+    def close_expired(self) -> list[WindowDelta]:
         """Finalise and evict every window the watermark has passed.
 
         Eviction is what bounds memory. The number of live windows is roughly
@@ -227,11 +302,15 @@ class WindowManager:
             return []
 
         expired = [key for key in self.windows if self.is_window_closed(key.window_start)]
-        closed: list[Aggregate] = []
+        closed: list[WindowDelta] = []
         for key in expired:
-            state = self.windows.pop(key)
+            state = self.windows[key]
             state.aggregate.is_closed = True
-            closed.append(state.aggregate)
+            # The final delta carries whatever was accumulated since the last
+            # flush plus the closed flag, so closing a window is just one more
+            # upsert rather than a separate code path.
+            closed.append(state.delta(key))
+            del self.windows[key]
 
         if closed:
             log.info(
