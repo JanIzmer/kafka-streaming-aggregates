@@ -75,6 +75,23 @@ ON CONFLICT (window_start, merchant_id) DO UPDATE SET
     updated_at            = now()
 """
 
+INSERT_WINDOW_USER = """
+INSERT INTO window_user (window_start, merchant_id, user_id)
+VALUES (%(window_start)s, %(merchant_id)s, %(user_id)s)
+ON CONFLICT DO NOTHING
+"""
+
+# Derived, not accumulated: re-running this for the same window is a no-op,
+# which is what makes a replay converge instead of inflating the count.
+RECOUNT_DISTINCT_USERS = """
+UPDATE agg_orders_minute AS a
+SET distinct_users = (
+    SELECT count(*) FROM window_user AS w
+    WHERE w.window_start = a.window_start AND w.merchant_id = a.merchant_id
+)
+WHERE a.window_start = %(window_start)s AND a.merchant_id = %(merchant_id)s
+"""
+
 INSERT_LEDGER = """
 INSERT INTO dedup_ledger (event_id, merchant_id, window_start)
 VALUES (%(event_id)s, %(merchant_id)s, %(window_start)s)
@@ -168,8 +185,21 @@ class Repository:
                 removed += deleted
                 if deleted < batch_size:
                     break
-        if removed:
-            log.info("store.ledger_purged", rows=removed, older_than=cutoff.isoformat())
+        # Window membership has the same lifetime as the ledger: once no event
+        # can still be applied to a window, the set is dead weight.
+        with self._pool.connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("DELETE FROM window_user WHERE window_start < %s", (cutoff,))
+                user_rows = cursor.rowcount
+            connection.commit()
+
+        if removed or user_rows:
+            log.info(
+                "store.ledger_purged",
+                ledger_rows=removed,
+                window_user_rows=user_rows,
+                older_than=cutoff.isoformat(),
+            )
         return removed
 
     # -- the write path ----------------------------------------------------
@@ -183,6 +213,7 @@ class Repository:
         checkpoints: Iterable[dict[str, Any]] = (),
     ) -> int:
         """Persist one batch atomically. Returns the number of aggregate rows touched."""
+        aggregate_deltas = list(deltas)
         aggregate_rows = [
             {
                 "window_start": delta.key.window_start,
@@ -203,6 +234,19 @@ class Repository:
             }
             for delta in deltas
         ]
+        user_rows = [
+            {
+                "window_start": delta.key.window_start,
+                "merchant_id": delta.key.merchant_id,
+                "user_id": user_id,
+            }
+            for delta in aggregate_deltas
+            for user_id in delta.new_users
+        ]
+        touched_windows = [
+            {"window_start": row["window_start"], "merchant_id": row["merchant_id"]}
+            for row in aggregate_rows
+        ]
         ledger_rows = list(ledger_entries)
         late_rows = list(late_events)
         dlq_rows = [letter.as_row() for letter in dead_letters]
@@ -215,6 +259,13 @@ class Repository:
             with connection.cursor() as cursor:
                 if aggregate_rows:
                     cursor.executemany(UPSERT_AGGREGATE, aggregate_rows)
+                if user_rows:
+                    cursor.executemany(INSERT_WINDOW_USER, user_rows)
+                if user_rows and touched_windows:
+                    # Only when membership actually changed: recomputing on
+                    # every flush would cost a count per window per 5 seconds
+                    # for no change in the result.
+                    cursor.executemany(RECOUNT_DISTINCT_USERS, touched_windows)
                 if ledger_rows:
                     cursor.executemany(INSERT_LEDGER, ledger_rows)
                 if late_rows:
@@ -227,6 +278,7 @@ class Repository:
         log.info(
             "store.flushed",
             aggregates=len(aggregate_rows),
+            new_users=len(user_rows),
             ledger=len(ledger_rows),
             late=len(late_rows),
             dlq=len(dlq_rows),

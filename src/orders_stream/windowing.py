@@ -78,13 +78,19 @@ class WindowDelta:
     refunded_amount_minor: int = 0
     late_events_applied: int = 0
     distinct_users: int = 0
+    # Users seen since the last flush, not the whole set: the sink stores
+    # membership, so it only ever needs the new ones.
+    new_users: tuple[str, ...] = ()
     first_event_at: datetime | None = None
     last_event_at: datetime | None = None
     is_closed: bool = False
 
     @property
     def is_empty(self) -> bool:
-        return all(getattr(self, name) == 0 for name in ADDITIVE_FIELDS)
+        return (
+            all(getattr(self, name) == 0 for name in ADDITIVE_FIELDS)
+            and not self.new_users
+        )
 
 
 @dataclass
@@ -96,6 +102,7 @@ class WindowState:
     # the difference. Kept rather than a running "pending" counter because a
     # failed flush must not lose the changes it tried to write.
     flushed: dict[str, int] = field(default_factory=dict)
+    flushed_users: set[str] = field(default_factory=set)
 
     def touch(self) -> None:
         self.dirty = True
@@ -108,6 +115,7 @@ class WindowState:
             first_event_at=current.first_event_at,
             last_event_at=current.last_event_at,
             distinct_users=len(self.users),
+            new_users=tuple(sorted(self.users - self.flushed_users)),
             is_closed=current.is_closed,
             **{
                 name: getattr(current, name) - self.flushed.get(name, 0)
@@ -119,6 +127,7 @@ class WindowState:
         """Record what has been persisted. Called only after the transaction
         commits - snapshotting earlier would silently drop a failed flush."""
         self.flushed = {name: getattr(self.aggregate, name) for name in ADDITIVE_FIELDS}
+        self.flushed_users = set(self.users)
         self.dirty = False
 
 

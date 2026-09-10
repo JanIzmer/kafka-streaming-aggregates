@@ -67,6 +67,27 @@ CREATE TABLE IF NOT EXISTS dedup_ledger (
 CREATE INDEX IF NOT EXISTS ix_dedup_ledger_seen_at ON dedup_ledger (seen_at);
 
 -- ---------------------------------------------------------------------------
+-- Exact distinct users per window.
+--
+-- A counter cannot do this: distinct counts are not additive, so the delta
+-- upsert that works for every other measure would be wrong here. Keeping the
+-- membership itself makes the count exact AND idempotent - re-applying an
+-- event is an ON CONFLICT DO NOTHING, and the count is derived rather than
+-- accumulated. The alternative (HyperLogLog) is cheaper in space but
+-- approximate, which is not worth it at this cardinality.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS window_user (
+    window_start    TIMESTAMPTZ  NOT NULL,
+    merchant_id     TEXT         NOT NULL,
+    user_id         TEXT         NOT NULL,
+    PRIMARY KEY (window_start, merchant_id, user_id)
+);
+
+-- Membership is only needed while a window can still change; after that the
+-- count in agg_orders_minute is final. Indexed for the retention purge.
+CREATE INDEX IF NOT EXISTS ix_window_user_window ON window_user (window_start);
+
+-- ---------------------------------------------------------------------------
 -- Events that arrived after their window had closed. Not dropped: dropping
 -- data silently is how you end up unable to explain a number.
 -- ---------------------------------------------------------------------------
