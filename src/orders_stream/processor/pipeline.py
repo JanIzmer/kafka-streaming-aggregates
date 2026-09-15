@@ -124,11 +124,16 @@ class BatchProcessor:
         # whole poll instead of one per event.
         new_events, duplicates = self.dedup.filter_batch([event for event, _ in events])
         result.duplicates += len(duplicates)
-        new_ids = {event.event_id for event in new_events}
+
+        # Consume each id once rather than testing membership in a set: when a
+        # producer retry puts the same event_id twice in one poll, both copies
+        # match the set and both would be applied.
+        pending_ids = {event.event_id for event in new_events}
 
         for event, record in events:
-            if event.event_id not in new_ids:
+            if event.event_id not in pending_ids:
                 continue
+            pending_ids.discard(event.event_id)
             self._route(event, record, result, now)
 
         if result.total:
