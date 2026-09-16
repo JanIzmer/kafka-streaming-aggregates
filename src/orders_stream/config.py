@@ -30,8 +30,10 @@ class Settings(BaseSettings):
 
     # --- windowing --------------------------------------------------------
     window_size_seconds: int = Field(default=60, ge=1)
-    # How long after a window closes we still accept events for it. Directly
-    # sets how much state is held: windows_in_memory ~ lateness / window_size.
+    # How far the watermark trails the newest event time - the out-of-orderness
+    # bound. A window closes once the watermark passes its end, so this buys
+    # tolerance before closing, not after. It also sets how much state is held:
+    # windows_in_memory ~ lateness / window_size.
     allowed_lateness_seconds: int = Field(default=300, ge=0)
     # If a partition goes quiet, its watermark would freeze and windows would
     # never close. After this long with no events, the watermark advances on

@@ -15,6 +15,14 @@ written out explicitly rather than left implicit in the code:
   continuously upserted, so the aggregates table always shows the in-progress
   value rather than nothing at all.
 
+* **`allowed_lateness` is the out-of-orderness bound, not a grace period after
+  closing.** It is how far the watermark trails the newest event time, so it
+  buys tolerance *before* a window closes rather than after. The consequence is
+  worth stating plainly: the `LATE_ACCEPTED` band - behind the watermark but in
+  a window that is still open - is at most one window wide. Everything older
+  than that is `TOO_LATE` by construction. Raising `allowed_lateness` is
+  therefore the only way to accept stragglers, and it costs proportional state.
+
 * **An event is classified against the watermark as it was *before* that event
   advanced it.** Otherwise an event would be judged by a watermark it set
   itself, and nothing would ever be late.

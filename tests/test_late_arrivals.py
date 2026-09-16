@@ -18,24 +18,27 @@ def test_out_of_order_but_ahead_of_the_watermark_is_still_on_time(windows: Windo
 
 
 def test_behind_the_watermark_but_window_open_is_accepted_as_late(windows: WindowManager):
-    windows.add(event(occurred_at=at(300)), now=at(300))  # watermark -> 12:03
+    # Watermark lands at 12:03:10, mid-window, which is where the late-accepted
+    # band exists: an event at 12:03:05 is behind it, but its window
+    # [12:03, 12:04) has not closed yet.
+    windows.add(event(occurred_at=at(310)), now=at(310))
 
-    outcome = windows.add(event(occurred_at=at(170)), now=at(300))
+    outcome = windows.add(event(occurred_at=at(185)), now=at(310))
 
     assert outcome is Outcome.LATE_ACCEPTED
     assert windows.late_count == 1
 
 
 def test_a_late_event_restates_the_window_and_bumps_the_revision(windows: WindowManager):
-    windows.add(event(occurred_at=at(170), amount_minor=1000), now=at(170))
-    windows.add(event(occurred_at=at(300)), now=at(300))
+    windows.add(event(occurred_at=at(185), amount_minor=1000), now=at(185))
+    windows.add(event(occurred_at=at(310)), now=at(310))  # watermark -> 12:03:10
 
-    windows.add(event(occurred_at=at(175), amount_minor=500), now=at(300))
+    windows.add(event(occurred_at=at(188), amount_minor=500), now=at(310))
 
     aggregate = next(
         state.aggregate
         for key, state in windows.windows.items()
-        if key.window_start == at(120)
+        if key.window_start == at(180)
     )
     assert aggregate.gross_amount_minor == 1500
     assert aggregate.late_events_applied == 1
@@ -69,12 +72,13 @@ def test_a_too_late_event_does_not_resurrect_the_window(windows: WindowManager):
 def test_lateness_is_judged_against_the_watermark_before_the_event(windows: WindowManager):
     """An event must not be judged by a watermark it set itself - otherwise the
     newest event is always 'on time' and nothing is ever late."""
-    windows.add(event(occurred_at=at(600)), now=at(600))
+    windows.add(event(occurred_at=at(610)), now=at(610))  # watermark -> 12:08:10
 
-    assert windows.add(event(occurred_at=at(540)), now=at(600)) is Outcome.LATE_ACCEPTED
+    assert windows.add(event(occurred_at=at(485)), now=at(610)) is Outcome.LATE_ACCEPTED
 
 
-def test_allowed_lateness_is_the_only_knob_that_changes_the_verdict():
+def test_allowed_lateness_decides_whether_a_straggler_is_kept_or_dropped():
+    """The same straggler, the same stream - only the knob differs."""
     generous = WindowManager(window_size_seconds=60, allowed_lateness_seconds=600)
     strict = WindowManager(window_size_seconds=60, allowed_lateness_seconds=60)
 
@@ -82,8 +86,10 @@ def test_allowed_lateness_is_the_only_knob_that_changes_the_verdict():
         manager.add(event(occurred_at=at(10)), now=at(10))
         manager.add(event(occurred_at=at(300)), now=at(300))
 
-    assert generous.add(event(occurred_at=at(20)), now=at(300)) is Outcome.LATE_ACCEPTED
-    assert strict.add(event(occurred_at=at(20)), now=at(300)) is Outcome.TOO_LATE
+    straggler = event(occurred_at=at(20))
+
+    assert generous.add(straggler, now=at(300)) is not Outcome.TOO_LATE
+    assert strict.add(straggler, now=at(300)) is Outcome.TOO_LATE
 
 
 def test_state_size_is_bounded_by_lateness_over_window_size():
