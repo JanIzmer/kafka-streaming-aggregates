@@ -1,0 +1,112 @@
+# ---------------------------------------------------------------------------
+# Full local stack:
+#
+#   redpanda   Kafka API, single broker (no ZooKeeper, fast to start)
+#   console    Redpanda Console on :8090 - topics, consumer lag, DLQ contents
+#   postgres   the sink
+#   processor  the consumer under test
+#   producer   synthetic traffic with duplicates and late events
+#
+#   make up && make demo
+# ---------------------------------------------------------------------------
+x-stream-image: &stream-image
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+  env_file:
+    - .env
+  depends_on:
+    redpanda:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+  volumes:
+    - ./src:/app/src
+    - ./contracts:/app/contracts
+
+services:
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 1G
+      - --overprovisioned
+      - --node-id 0
+      - --check=false
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"   # host clients
+      - "9644:9644"     # admin API
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  console:
+    image: redpandadata/console:v2.7.2
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - "8090:8080"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: orders
+      POSTGRES_PASSWORD: orders
+      POSTGRES_DB: orders
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orders -d orders"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  setup:
+    <<: *stream-image
+    command: ["sh", "-c", "orders-producer create-topics && orders-processor init-db"]
+    restart: on-failure
+
+  processor:
+    <<: *stream-image
+    command: ["orders-processor", "run"]
+    ports:
+      - "9108:9108"   # prometheus metrics
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9108/metrics > /dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    # The consumer is stateful: a restart loses open windows, which is
+    # survivable (deltas, not absolute totals) but not free. Restart, do not
+    # thrash.
+    restart: unless-stopped
+
+  producer:
+    <<: *stream-image
+    profiles: ["traffic"]
+    command: ["orders-producer", "run", "--rate", "200", "--duration", "0"]
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
+volumes:
+  redpanda-data:
+  postgres-data:
