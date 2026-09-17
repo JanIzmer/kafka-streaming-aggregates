@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Ruff
+        run: |
+          ruff check --output-format=github src tests
+          ruff format --check src tests
+
+      - name: Mypy
+        run: mypy
+
+  test:
+    name: Unit tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Pytest
+        # The unit suite must never need a broker: if it does, it stops being
+        # run locally and starts being ignored.
+        run: pytest -m "not integration" --cov=orders_stream --cov-report=term-missing
+
+  integration:
+    name: End to end
+    runs-on: ubuntu-latest
+    # Slow and needs containers, so it does not gate every push to a branch -
+    # but it must pass before anything reaches main.
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Start Redpanda and Postgres
+        run: |
+          cp .env.example .env
+          docker compose up -d redpanda postgres
+          timeout 120 bash -c 'until docker compose exec -T redpanda rpk cluster health | grep -q "Healthy:.*true"; do sleep 2; done'
+          timeout 60 bash -c 'until docker compose exec -T postgres pg_isready -U orders; do sleep 2; done'
+
+      - name: Install
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Integration tests
+        env:
+          RUN_INTEGRATION: "1"
+          KAFKA_BOOTSTRAP_SERVERS: localhost:19092
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5433"
+        run: pytest -m integration -v
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose logs --tail 200
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  docker:
+    name: Image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          load: true
+          tags: orders-stream:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Entrypoints resolve
+        # A broken console script only fails when the container starts, which
+        # in production means during a deploy.
+        run: |
+          docker run --rm orders-stream:ci orders-processor --help > /dev/null
+          docker run --rm orders-stream:ci orders-producer --help > /dev/null
+
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs: [lint, test, integration, docker]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify every job succeeded
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "one or more jobs failed"; exit 1
+          fi
+          echo "all green"
