@@ -3,5 +3,11 @@ psycopg[binary,pool]==3.2.3
 pydantic==2.9.2
 pydantic-settings==2.5.2
 structlog==24.4.0
-typer==0.12.5
+typer==0.27.2
+# click is typer's transitive dependency and is pinned deliberately: click
+# 8.2 tightened flag validation in a way that breaks typer < 0.15, and an
+# unpinned transitive dependency defeats the point of this file. The image
+# built fine and then died at startup on
+# 'Secondary flag is not valid for non-boolean flag'.
+click==8.5.0
 prometheus-client==0.21.0
