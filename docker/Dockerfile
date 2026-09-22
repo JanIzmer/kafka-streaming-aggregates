@@ -3,7 +3,7 @@
 # contract and the codec, so building them separately would let the two halves
 # drift apart in exactly the place that matters.
 # ---------------------------------------------------------------------------
-FROM python:3.11-slim AS base
+FROM python:3.14-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
