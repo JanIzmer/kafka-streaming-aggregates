@@ -2,7 +2,7 @@ confluent-kafka==2.5.3
 psycopg[binary,pool]==3.2.3
 pydantic==2.9.2
 pydantic-settings==2.5.2
-structlog==24.4.0
+structlog==26.1.0
 typer==0.27.2
 # click is typer's transitive dependency and is pinned deliberately: click
 # 8.2 tightened flag validation in a way that breaks typer < 0.15, and an
