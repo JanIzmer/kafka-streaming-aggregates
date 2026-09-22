@@ -1,5 +1,5 @@
 confluent-kafka==2.5.3
-psycopg[binary,pool]==3.2.3
+psycopg[binary,pool]==3.3.6
 pydantic==2.9.2
 pydantic-settings==2.5.2
 structlog==24.4.0
