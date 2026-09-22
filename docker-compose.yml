@@ -10,6 +10,11 @@
 #   make up && make demo
 # ---------------------------------------------------------------------------
 x-stream-image: &stream-image
+  # One shared image tag. Without it every service that uses this anchor gets
+  # its own build and its own image copy, so `compose build <one service>`
+  # leaves the others on stale dependencies - which is exactly how a pinned
+  # requirements.txt can be in the repo and not in the running container.
+  image: orders-stream:local
   build:
     context: .
     dockerfile: docker/Dockerfile
