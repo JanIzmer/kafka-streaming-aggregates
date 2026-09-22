@@ -33,7 +33,7 @@ from orders_stream.config import Settings
 from orders_stream.contract import load_contract
 from orders_stream.dedup import Deduplicator
 from orders_stream.logging_conf import get_logger
-from orders_stream.metrics import Metrics
+from orders_stream.metrics import Metrics, NullMetrics
 from orders_stream.processor.kafka_io import (
     DlqPublisher,
     consumer_config,
@@ -56,13 +56,15 @@ class ProcessorService:
         repository: Repository,
         consumer: Any,
         dlq: Any,
-        metrics: Metrics | None = None,
+        metrics: Metrics | NullMetrics | None = None,
     ) -> None:
         self.settings = settings
         self.repository = repository
         self.consumer = consumer
         self.dlq = dlq
-        self.metrics = metrics or Metrics()
+        # NullMetrics, not Metrics(): constructing a second real Metrics in
+        # one process raises. Callers that want metrics pass them in.
+        self.metrics = metrics if metrics is not None else NullMetrics()
 
         contract = load_contract("order_event", 1, settings.contracts_dir)
         self.windows = WindowManager(

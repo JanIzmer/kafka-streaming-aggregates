@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from prometheus_client import Counter, Gauge, start_http_server
+from prometheus_client import REGISTRY, CollectorRegistry, Counter, Gauge, start_http_server
 
 from orders_stream.logging_conf import get_logger
 
@@ -31,28 +31,49 @@ NAMESPACE = "orders_stream"
 
 
 class Metrics:
-    def __init__(self) -> None:
+    def __init__(self, registry: CollectorRegistry | None = None) -> None:
+        # The registry is injectable because prometheus_client refuses to
+        # register the same metric name twice in one process. Without this, a
+        # second ProcessorService in the same interpreter - which is exactly
+        # what the integration tests construct - dies on DuplicateTimeseries
+        # rather than on anything to do with the pipeline.
+        target = registry if registry is not None else REGISTRY
+
         self.events = Counter(
             f"{NAMESPACE}_events_total",
             "Records handled, by how they were treated",
             ["outcome"],
+            registry=target,
         )
-        self.flushes = Counter(f"{NAMESPACE}_flushes_total", "Successful flush + commit cycles")
+        self.flushes = Counter(
+            f"{NAMESPACE}_flushes_total",
+            "Successful flush + commit cycles",
+            registry=target,
+        )
         self.flush_failures = Counter(
-            f"{NAMESPACE}_flush_failures_total", "Flushes that raised and were retried"
+            f"{NAMESPACE}_flush_failures_total",
+            "Flushes that raised and were retried",
+            registry=target,
         )
         self.open_windows = Gauge(
-            f"{NAMESPACE}_open_windows", "Windows held in memory - the state size"
+            f"{NAMESPACE}_open_windows",
+            "Windows held in memory - the state size",
+            registry=target,
         )
         self.tracked_users = Gauge(
-            f"{NAMESPACE}_tracked_users", "User ids held across open windows"
+            f"{NAMESPACE}_tracked_users",
+            "User ids held across open windows",
+            registry=target,
         )
         self.dedup_cache = Gauge(
-            f"{NAMESPACE}_dedup_cache_entries", "Event ids in the in-memory dedup tier"
+            f"{NAMESPACE}_dedup_cache_entries",
+            "Event ids in the in-memory dedup tier",
+            registry=target,
         )
         self.watermark_lag = Gauge(
             f"{NAMESPACE}_watermark_lag_seconds",
             "Wall clock minus the watermark; how far behind event time we are",
+            registry=target,
         )
 
     def observe_batch(self, result: BatchResult) -> None:

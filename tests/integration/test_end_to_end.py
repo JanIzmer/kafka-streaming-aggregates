@@ -78,6 +78,7 @@ def drain(settings, repository, seconds: float = 12.0):
     """Run the service until it has been idle for a moment, then stop it."""
     from confluent_kafka import Consumer
 
+    from orders_stream.metrics import NullMetrics
     from orders_stream.processor.kafka_io import NullDlqPublisher, consumer_config
     from orders_stream.processor.service import ProcessorService
 
@@ -86,6 +87,7 @@ def drain(settings, repository, seconds: float = 12.0):
         repository=repository,
         consumer=Consumer(consumer_config(settings)),
         dlq=NullDlqPublisher(),
+        metrics=NullMetrics(),
     )
 
     deadline = time.monotonic() + seconds
