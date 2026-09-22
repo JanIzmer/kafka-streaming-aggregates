@@ -31,12 +31,15 @@ Then look at what happened:
 make aggregates    # the rows that were built
 make lateness      # events that missed their window
 make dlq           # what was refused, grouped by reason
-make dedup-proof   # ledger rows vs distinct ids - these must be equal
+make dedup-proof   # every record accounted for, exactly once
 make lag           # consumer group lag
 ```
 
-`make dedup-proof` is the one that demonstrates the central claim. If
-`ledger_rows` and `distinct_ids` differ, deduplication is broken.
+`make dedup-proof` is the one that demonstrates the central claim. It prints the
+per-outcome counters next to the rows that actually reached the windows. Two
+things must hold: the counters sum to exactly the number of records the
+producer sent, and `on_time + late_accepted` equals `sum(events_total)`. If the
+second is short, events were lost; if it is over, something was applied twice.
 
 Redpanda Console is on <http://localhost:8090> (topics, consumer lag, raw DLQ
 messages). Prometheus metrics are on <http://localhost:9108/metrics>.

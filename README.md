@@ -98,11 +98,15 @@ make demo        # four scenarios: clean, duplicates, late-burst, poison
 make aggregates  # what landed
 make lateness    # what missed its window
 make dlq         # what was refused, and why
-make dedup-proof # ledger rows vs distinct ids - they must match
+make dedup-proof # every record accounted for, exactly once
 ```
 
-`make dedup-proof` is the one that demonstrates the central claim: if those two
-numbers differ, deduplication is broken.
+`make dedup-proof` is the one that demonstrates the central claim. It prints how
+every record was treated and what actually reached the windows: the outcome
+counters must sum to exactly what the producer sent, and `on_time +
+late_accepted` must equal the events applied. On the run above: 4397 applied +
+1655 duplicates + 310 too late + 75 contract violations + 44 malformed + 19
+clock skew = 6500 produced, with 4397 rows aggregated.
 
 Unit tests need no broker and no database:
 

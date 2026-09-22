@@ -2,6 +2,7 @@
 SHELL := /bin/bash
 
 PSQL := docker compose exec -T postgres psql -U orders -d orders
+METRICS_PORT ?= 9108
 
 .PHONY: help
 help: ## Show this help
@@ -79,8 +80,14 @@ dlq: ## Dead letters grouped by reason
 	@$(PSQL) -c "SELECT reason, count(*), max(failed_at) AS newest FROM dlq_events GROUP BY 1 ORDER BY 2 DESC;"
 
 .PHONY: dedup-proof
-dedup-proof: ## Show that no event_id was applied twice
-	@$(PSQL) -c "SELECT count(*) AS ledger_rows, count(DISTINCT event_id) AS distinct_ids FROM dedup_ledger;"
+dedup-proof: ## Show that every record was classified exactly once
+	@echo "-- how each record was treated; these must sum to what the producer sent --"
+	@curl -s localhost:$(METRICS_PORT)/metrics | grep '^orders_stream_events_total{' | sort
+	@echo
+	@echo "-- events applied to windows; must equal on_time + late_accepted above --"
+	@$(PSQL) -t -c "SELECT sum(events_total) FROM agg_orders_minute;"
+	@echo "-- ledger size (event_id is the PK, so this is the de-duplicated count) --"
+	@$(PSQL) -t -c "SELECT count(*) FROM dedup_ledger;"
 
 .PHONY: lag
 lag: ## Consumer group lag
