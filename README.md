@@ -88,6 +88,9 @@ nothing is ever late.
 
 ## Quickstart
 
+**Docker, and nothing else.** No external account anywhere — Redpanda and
+Postgres run locally and the producer generates its own traffic.
+
 ```bash
 cp .env.example .env
 make up          # redpanda + postgres + processor; console on :8090
@@ -98,11 +101,17 @@ make dlq         # what was refused, and why
 make dedup-proof # ledger rows vs distinct ids - they must match
 ```
 
+`make dedup-proof` is the one that demonstrates the central claim: if those two
+numbers differ, deduplication is broken.
+
 Unit tests need no broker and no database:
 
 ```bash
-make install && make test    # 72 tests
+make install && make test    # 76 tests
 ```
+
+Ports, integration-test setup and the knobs worth understanding before changing
+them: [`docs/setup.md`](docs/setup.md). **CI needs no secrets.**
 
 ---
 
@@ -120,10 +129,11 @@ src/orders_stream/
   processor/pipeline.py         the routing table, no Kafka or SQL in sight
   processor/service.py          the run loop: flush, then commit, in that order
   producer/generator.py         synthetic traffic with injected faults
-tests/                          72 unit tests + integration tests behind a flag
+tests/                          76 unit tests + integration tests behind a flag
 ```
 
-Detail: [delivery semantics](docs/delivery_semantics.md) ·
+Detail: [setup](docs/setup.md) ·
+[delivery semantics](docs/delivery_semantics.md) ·
 [late data](docs/late_data.md) ·
 [failure modes](docs/failure_modes.md) ·
 [runbook](docs/runbook.md) ·
@@ -274,7 +284,7 @@ replay requirement, or a peak far above the average.
 
 ## Testing
 
-72 unit tests, no broker and no database — the suite must stay runnable with
+76 unit tests, no broker and no database — the suite must stay runnable with
 nothing installed but Python, or it stops being run. They cover the things that
 are expensive to get wrong: every dedup tier including the failed-flush case,
 epoch-aligned bucketing, watermark monotonicity, the full late-data
