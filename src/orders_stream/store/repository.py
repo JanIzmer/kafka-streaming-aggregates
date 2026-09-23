@@ -20,7 +20,7 @@ its own transaction would open a gap where the second case double-counts.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +33,7 @@ log = get_logger(__name__)
 SQL_DIR = Path(__file__).parent / "sql"
 
 UPSERT_AGGREGATE = """
-INSERT INTO agg_orders_minute (
+INSERT INTO agg_orders_minute AS a (
     window_start, window_end, merchant_id,
     events_total, orders_placed, orders_paid, orders_cancelled, orders_refunded,
     gross_amount_minor, refunded_amount_minor, net_amount_minor,
@@ -49,29 +49,29 @@ VALUES (
     %(late_events_applied)s, 1, %(is_closed)s, now()
 )
 ON CONFLICT (window_start, merchant_id) DO UPDATE SET
-    events_total          = agg_orders_minute.events_total          + EXCLUDED.events_total,
-    orders_placed         = agg_orders_minute.orders_placed         + EXCLUDED.orders_placed,
-    orders_paid           = agg_orders_minute.orders_paid           + EXCLUDED.orders_paid,
-    orders_cancelled      = agg_orders_minute.orders_cancelled      + EXCLUDED.orders_cancelled,
-    orders_refunded       = agg_orders_minute.orders_refunded       + EXCLUDED.orders_refunded,
-    gross_amount_minor    = agg_orders_minute.gross_amount_minor    + EXCLUDED.gross_amount_minor,
-    refunded_amount_minor = agg_orders_minute.refunded_amount_minor + EXCLUDED.refunded_amount_minor,
-    net_amount_minor      = (agg_orders_minute.gross_amount_minor + EXCLUDED.gross_amount_minor)
-                          - (agg_orders_minute.refunded_amount_minor + EXCLUDED.refunded_amount_minor),
-    distinct_users        = GREATEST(agg_orders_minute.distinct_users, EXCLUDED.distinct_users),
+    events_total          = a.events_total          + EXCLUDED.events_total,
+    orders_placed         = a.orders_placed         + EXCLUDED.orders_placed,
+    orders_paid           = a.orders_paid           + EXCLUDED.orders_paid,
+    orders_cancelled      = a.orders_cancelled      + EXCLUDED.orders_cancelled,
+    orders_refunded       = a.orders_refunded       + EXCLUDED.orders_refunded,
+    gross_amount_minor    = a.gross_amount_minor    + EXCLUDED.gross_amount_minor,
+    refunded_amount_minor = a.refunded_amount_minor + EXCLUDED.refunded_amount_minor,
+    net_amount_minor      = (a.gross_amount_minor    + EXCLUDED.gross_amount_minor)
+                          - (a.refunded_amount_minor + EXCLUDED.refunded_amount_minor),
+    distinct_users        = GREATEST(a.distinct_users, EXCLUDED.distinct_users),
     first_event_at        = LEAST(
-                                COALESCE(agg_orders_minute.first_event_at, EXCLUDED.first_event_at),
-                                COALESCE(EXCLUDED.first_event_at, agg_orders_minute.first_event_at)),
+                                COALESCE(a.first_event_at, EXCLUDED.first_event_at),
+                                COALESCE(EXCLUDED.first_event_at, a.first_event_at)),
     last_event_at         = GREATEST(
-                                COALESCE(agg_orders_minute.last_event_at, EXCLUDED.last_event_at),
-                                COALESCE(EXCLUDED.last_event_at, agg_orders_minute.last_event_at)),
-    late_events_applied   = agg_orders_minute.late_events_applied   + EXCLUDED.late_events_applied,
+                                COALESCE(a.last_event_at, EXCLUDED.last_event_at),
+                                COALESCE(EXCLUDED.last_event_at, a.last_event_at)),
+    late_events_applied   = a.late_events_applied   + EXCLUDED.late_events_applied,
     -- Only a restatement bumps the revision. A normal in-progress update of an
     -- open window is not a correction, and treating it as one would make the
     -- counter meaningless.
-    revision              = agg_orders_minute.revision
+    revision              = a.revision
                           + CASE WHEN EXCLUDED.late_events_applied > 0 THEN 1 ELSE 0 END,
-    is_closed             = agg_orders_minute.is_closed OR EXCLUDED.is_closed,
+    is_closed             = a.is_closed OR EXCLUDED.is_closed,
     updated_at            = now()
 """
 
@@ -111,7 +111,10 @@ VALUES (
 
 INSERT_DLQ = """
 INSERT INTO dlq_events (reason, detail, topic, partition, "offset", key, payload, failed_at)
-VALUES (%(reason)s, %(detail)s, %(topic)s, %(partition)s, %(offset)s, %(key)s, %(payload)s, %(failed_at)s)
+VALUES (
+    %(reason)s, %(detail)s, %(topic)s, %(partition)s,
+    %(offset)s, %(key)s, %(payload)s, %(failed_at)s
+)
 ON CONFLICT (topic, partition, "offset") DO NOTHING
 """
 
@@ -166,7 +169,7 @@ class Repository:
         over millions of rows takes a long lock and bloats the WAL, and this
         runs while the processor is consuming.
         """
-        cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=retention_hours)
+        cutoff = datetime.now(tz=UTC) - timedelta(hours=retention_hours)
         removed = 0
         with self._pool.connection() as connection:
             while True:
@@ -252,28 +255,27 @@ class Repository:
         dlq_rows = [letter.as_row() for letter in dead_letters]
         checkpoint_rows = list(checkpoints)
 
-        with self._pool.connection() as connection:
-            # psycopg opens a transaction implicitly and commits on a clean
-            # exit; any exception rolls the whole thing back, which is exactly
-            # the all-or-nothing property this method promises.
-            with connection.cursor() as cursor:
-                if aggregate_rows:
-                    cursor.executemany(UPSERT_AGGREGATE, aggregate_rows)
-                if user_rows:
-                    cursor.executemany(INSERT_WINDOW_USER, user_rows)
-                if user_rows and touched_windows:
-                    # Only when membership actually changed: recomputing on
-                    # every flush would cost a count per window per 5 seconds
-                    # for no change in the result.
-                    cursor.executemany(RECOUNT_DISTINCT_USERS, touched_windows)
-                if ledger_rows:
-                    cursor.executemany(INSERT_LEDGER, ledger_rows)
-                if late_rows:
-                    cursor.executemany(INSERT_LATE, late_rows)
-                if dlq_rows:
-                    cursor.executemany(INSERT_DLQ, dlq_rows)
-                if checkpoint_rows:
-                    cursor.executemany(UPSERT_CHECKPOINT, checkpoint_rows)
+        # psycopg opens a transaction implicitly and commits on a clean exit;
+        # any exception rolls the whole thing back, which is exactly the
+        # all-or-nothing property this method promises.
+        with self._pool.connection() as connection, connection.cursor() as cursor:
+            if aggregate_rows:
+                cursor.executemany(UPSERT_AGGREGATE, aggregate_rows)
+            if user_rows:
+                cursor.executemany(INSERT_WINDOW_USER, user_rows)
+            if user_rows and touched_windows:
+                # Only when membership actually changed: recomputing on every
+                # flush would cost a count per window per 5 seconds for no
+                # change in the result.
+                cursor.executemany(RECOUNT_DISTINCT_USERS, touched_windows)
+            if ledger_rows:
+                cursor.executemany(INSERT_LEDGER, ledger_rows)
+            if late_rows:
+                cursor.executemany(INSERT_LATE, late_rows)
+            if dlq_rows:
+                cursor.executemany(INSERT_DLQ, dlq_rows)
+            if checkpoint_rows:
+                cursor.executemany(UPSERT_CHECKPOINT, checkpoint_rows)
 
         log.info(
             "store.flushed",
