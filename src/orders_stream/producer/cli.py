@@ -1,9 +1,9 @@
 """Producer CLI.
 
-    orders-producer create-topics
-    orders-producer run --rate 200 --duration 120
-    orders-producer run --rate 500 --duplicate-rate 0.2   # stress the dedup path
-    orders-producer scenario late-burst                   # reproducible demo
+orders-producer create-topics
+orders-producer run --rate 200 --duration 120
+orders-producer run --rate 500 --duplicate-rate 0.2   # stress the dedup path
+orders-producer scenario late-burst                   # reproducible demo
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def create_topics(partitions: int = 6, replication: int = 1) -> None:
         try:
             future.result()
             typer.echo(f"created {name}")
-        except Exception as exc:  # noqa: BLE001 - "already exists" is the common case
+        except Exception as exc:
             typer.echo(f"{name}: {exc}")
 
 
@@ -133,10 +133,14 @@ def scenario(
     from confluent_kafka import Producer
 
     profiles = {
-        "clean": FaultRates(duplicate=0, late=0, very_late=0, malformed=0, unknown_event_type=0, future_skew=0),
+        "clean": FaultRates(
+            duplicate=0, late=0, very_late=0, malformed=0, unknown_event_type=0, future_skew=0
+        ),
         "duplicates": FaultRates(duplicate=0.35, late=0.02, very_late=0, malformed=0),
         "late-burst": FaultRates(duplicate=0.02, late=0.35, very_late=0.15, malformed=0),
-        "poison": FaultRates(duplicate=0.02, late=0.05, malformed=0.15, unknown_event_type=0.08, future_skew=0.05),
+        "poison": FaultRates(
+            duplicate=0.02, late=0.05, malformed=0.15, unknown_event_type=0.08, future_skew=0.05
+        ),
     }
     if name not in profiles:
         raise typer.BadParameter(f"unknown scenario '{name}'; pick one of {sorted(profiles)}")

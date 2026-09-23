@@ -22,7 +22,7 @@ import json
 import random
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 MERCHANTS = (
     "m_kioskone",
@@ -85,7 +85,7 @@ class EventGenerator:
 
     def next_record(self, now: datetime | None = None) -> tuple[str, bytes]:
         """Produce one (key, value) pair ready for Kafka."""
-        now = now or datetime.now(tz=timezone.utc)
+        now = now or datetime.now(tz=UTC)
         roll = self._random.random()
         faults = self.faults
 
@@ -107,7 +107,9 @@ class EventGenerator:
 
         threshold += faults.very_late
         if roll < threshold:
-            return self._event(now - timedelta(seconds=self._random.randint(*self.very_late_seconds)))
+            return self._event(
+                now - timedelta(seconds=self._random.randint(*self.very_late_seconds))
+            )
 
         threshold += faults.late
         if roll < threshold:
@@ -122,15 +124,15 @@ class EventGenerator:
 
     def _event(self, occurred_at: datetime, event_type: str | None = None) -> tuple[str, bytes]:
         merchant = self._random.choice(self.merchants)
-        chosen_type = event_type or self._random.choices(
-            EVENT_TYPES, weights=(40, 45, 10, 5), k=1
-        )[0]
+        chosen_type = (
+            event_type or self._random.choices(EVENT_TYPES, weights=(40, 45, 10, 5), k=1)[0]
+        )
 
         payload = {
             "event_id": str(uuid.UUID(int=self._random.getrandbits(128))),
             "event_type": chosen_type,
             "occurred_at": occurred_at.isoformat(),
-            "ingested_at": datetime.now(tz=timezone.utc).isoformat(),
+            "ingested_at": datetime.now(tz=UTC).isoformat(),
             "order_id": f"ord_{self._random.getrandbits(40):x}",
             "merchant_id": merchant,
             "user_id": f"u_{self._random.randrange(self.user_pool):04d}",
@@ -161,10 +163,10 @@ class EventGenerator:
         merchant = self._random.choice(self.merchants)
         broken = self._random.choice(
             (
-                b'{"event_id": "abc", "event_type": ',          # truncated JSON
+                b'{"event_id": "abc", "event_type": ',  # truncated JSON
                 b"not json at all",
                 b'{"event_id": "", "event_type": "order_paid"}',  # empty required field
-                b'["order_paid"]',                               # JSON, but not an object
+                b'["order_paid"]',  # JSON, but not an object
                 b'{"event_id": "x1", "event_type": "order_paid", "occurred_at": "yesterday",'
                 b' "order_id": "o1", "merchant_id": "m_kioskone"}',
             )

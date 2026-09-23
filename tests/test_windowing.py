@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from orders_stream.models import window_start_for
 from orders_stream.windowing import Outcome, WindowManager
@@ -9,17 +9,17 @@ from tests.factories import BASE_TIME, at, event
 
 def test_windows_are_aligned_to_the_epoch_not_to_the_first_event():
     """Two processors, and a replay, must agree on bucket boundaries."""
-    start = window_start_for(datetime(2026, 9, 14, 12, 0, 37, tzinfo=timezone.utc), 60)
+    start = window_start_for(datetime(2026, 9, 14, 12, 0, 37, tzinfo=UTC), 60)
 
-    assert start == datetime(2026, 9, 14, 12, 0, 0, tzinfo=timezone.utc)
-    assert window_start_for(datetime(2026, 9, 14, 12, 0, 59, 999999, tzinfo=timezone.utc), 60) == start
-    assert window_start_for(datetime(2026, 9, 14, 12, 1, 0, tzinfo=timezone.utc), 60) != start
+    assert start == datetime(2026, 9, 14, 12, 0, 0, tzinfo=UTC)
+    assert window_start_for(datetime(2026, 9, 14, 12, 0, 59, 999999, tzinfo=UTC), 60) == start
+    assert window_start_for(datetime(2026, 9, 14, 12, 1, 0, tzinfo=UTC), 60) != start
 
 
 def test_naive_timestamps_are_treated_as_utc():
     naive = datetime(2026, 9, 14, 12, 0, 30)
 
-    assert window_start_for(naive, 60) == datetime(2026, 9, 14, 12, 0, tzinfo=timezone.utc)
+    assert window_start_for(naive, 60) == datetime(2026, 9, 14, 12, 0, tzinfo=UTC)
 
 
 def test_events_in_the_same_minute_share_a_window(windows: WindowManager):
@@ -61,7 +61,9 @@ def test_event_types_map_to_the_right_measures(windows: WindowManager):
         ("order_cancelled", None),
         ("order_refunded", 500),
     ):
-        windows.add(event(event_type=event_type, amount_minor=amount, occurred_at=at(10)), now=at(10))
+        windows.add(
+            event(event_type=event_type, amount_minor=amount, occurred_at=at(10)), now=at(10)
+        )
 
     aggregate = windows.dirty_aggregates()[0]
     assert (aggregate.orders_placed, aggregate.orders_paid) == (1, 1)

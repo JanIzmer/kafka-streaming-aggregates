@@ -63,7 +63,9 @@ class Contract:
         amount = payload.get("amount_minor")
         if amount is not None:
             if isinstance(amount, bool) or not isinstance(amount, int):
-                problems.append(f"amount_minor: expected integer minor units, got {type(amount).__name__}")
+                problems.append(
+                    f"amount_minor: expected integer minor units, got {type(amount).__name__}"
+                )
             elif amount < 0:
                 problems.append(f"amount_minor: {amount} is negative")
 

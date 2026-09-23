@@ -36,9 +36,7 @@ def test_a_late_event_restates_the_window_and_bumps_the_revision(windows: Window
     windows.add(event(occurred_at=at(188), amount_minor=500), now=at(310))
 
     aggregate = next(
-        state.aggregate
-        for key, state in windows.windows.items()
-        if key.window_start == at(180)
+        state.aggregate for key, state in windows.windows.items() if key.window_start == at(180)
     )
     assert aggregate.gross_amount_minor == 1500
     assert aggregate.late_events_applied == 1
@@ -107,7 +105,9 @@ def test_state_size_is_bounded_by_lateness_over_window_size():
 def test_replaying_the_same_events_in_a_different_order_gives_the_same_totals():
     forward = WindowManager(window_size_seconds=60, allowed_lateness_seconds=600)
     backward = WindowManager(window_size_seconds=60, allowed_lateness_seconds=600)
-    events = [event(event_id=f"e{i}", occurred_at=at(i * 5), amount_minor=100 + i) for i in range(10)]
+    events = [
+        event(event_id=f"e{i}", occurred_at=at(i * 5), amount_minor=100 + i) for i in range(10)
+    ]
 
     for item in events:
         forward.add(item, now=at(60))

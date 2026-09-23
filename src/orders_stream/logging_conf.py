@@ -16,9 +16,15 @@ import structlog
 def configure_logging(level: str = "INFO", json_logs: bool = False) -> None:
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=level.upper())
 
-    renderer: structlog.types.Processor = (
-        structlog.processors.JSONRenderer() if json_logs else structlog.dev.ConsoleRenderer()
-    )
+    # An if/else rather than a ternary: the two renderer classes have no
+    # common base, so a conditional expression widens to `object` and mypy
+    # rejects the assignment. SIM108 wants the ternary back, and this is the
+    # one place the two tools genuinely disagree - the type checker wins.
+    renderer: structlog.typing.Processor
+    if json_logs:  # noqa: SIM108
+        renderer = structlog.processors.JSONRenderer()
+    else:
+        renderer = structlog.dev.ConsoleRenderer()
 
     structlog.configure(
         processors=[
@@ -35,4 +41,4 @@ def configure_logging(level: str = "INFO", json_logs: bool = False) -> None:
 
 
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:
-    return structlog.get_logger(name)  # type: ignore[no-any-return]
+    return structlog.get_logger(name)

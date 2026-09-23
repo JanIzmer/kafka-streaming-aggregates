@@ -49,6 +49,13 @@ mypy_path = "src"
 disallow_untyped_defs = true
 warn_unused_ignores = true
 
+[[tool.mypy.overrides]]
+# These ship no type information and no stubs exist. Silencing the
+# import error is honest; the alternative is a blanket
+# ignore_missing_imports that also hides our own broken imports.
+module = ["confluent_kafka.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "."]

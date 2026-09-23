@@ -13,7 +13,7 @@ Only metrics somebody would actually alert on. The three that matter most:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from prometheus_client import REGISTRY, CollectorRegistry, Counter, Gauge, start_http_server
@@ -86,7 +86,7 @@ class Metrics:
         self.tracked_users.set(windows.tracked_user_count)
         self.dedup_cache.set(dedup.cache_len)
         if windows.watermark is not None:
-            lag = (datetime.now(tz=timezone.utc) - windows.watermark).total_seconds()
+            lag = (datetime.now(tz=UTC) - windows.watermark).total_seconds()
             self.watermark_lag.set(lag)
 
     @staticmethod

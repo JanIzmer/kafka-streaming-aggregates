@@ -26,7 +26,7 @@ Undecodable bytes are the exception - there is no id to record.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import ValidationError
@@ -108,7 +108,7 @@ class BatchProcessor:
         self._unknown_fields_seen: set[str] = set()
 
     def process(self, records: list[RawRecord], now: datetime | None = None) -> BatchResult:
-        now = now or datetime.now(tz=timezone.utc)
+        now = now or datetime.now(tz=UTC)
         result = BatchResult()
         events: list[tuple[OrderEvent, RawRecord]] = []
 
@@ -249,7 +249,7 @@ class BatchProcessor:
             {
                 "event_id": event_id,
                 "merchant_id": str(payload.get("merchant_id") or "unknown"),
-                "window_start": datetime.now(tz=timezone.utc),
+                "window_start": datetime.now(tz=UTC),
             }
         )
 

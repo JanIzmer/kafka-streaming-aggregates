@@ -77,7 +77,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _lateness_must_be_usable(self) -> Settings:
-        if self.allowed_lateness_seconds and self.allowed_lateness_seconds < self.window_size_seconds:
+        if (
+            self.allowed_lateness_seconds
+            and self.allowed_lateness_seconds < self.window_size_seconds
+        ):
             # Not fatal, but it means a window can close before the next window's
             # first event arrives, which surprises people. Say so at startup.
             import warnings

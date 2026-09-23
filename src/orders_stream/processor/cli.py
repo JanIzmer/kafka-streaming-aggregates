@@ -1,9 +1,9 @@
 """Processor CLI.
 
-    orders-processor run               # consume forever
-    orders-processor init-db           # apply the schema
-    orders-processor health            # one-shot health read
-    orders-processor replay-dlq --reason too_late --limit 100
+orders-processor run               # consume forever
+orders-processor init-db           # apply the schema
+orders-processor health            # one-shot health read
+orders-processor replay-dlq --reason too_late --limit 100
 """
 
 from __future__ import annotations
@@ -111,7 +111,9 @@ def replay_dlq(
 
     settings = get_settings()
     repository = Repository(settings.postgres_dsn)
-    producer = None if dry_run else Producer({"bootstrap.servers": settings.kafka_bootstrap_servers})
+    producer = (
+        None if dry_run else Producer({"bootstrap.servers": settings.kafka_bootstrap_servers})
+    )
 
     try:
         with repository._pool.connection() as connection, connection.cursor() as cursor:
@@ -137,9 +139,7 @@ def replay_dlq(
                     key=(key or "").encode("utf-8"),
                     value=payload.encode("utf-8"),
                 )
-                cursor.execute(
-                    "UPDATE dlq_events SET replayed_at = now() WHERE id = %s", (row_id,)
-                )
+                cursor.execute("UPDATE dlq_events SET replayed_at = now() WHERE id = %s", (row_id,))
             if producer is not None:
                 producer.flush(30.0)
     finally:

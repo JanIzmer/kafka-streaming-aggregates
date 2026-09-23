@@ -14,7 +14,7 @@ run, and neither is reproducible.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -46,8 +46,8 @@ class OrderEvent(BaseModel):
     @classmethod
     def _must_be_utc(cls, value: datetime) -> datetime:
         if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
     @property
     def amount(self) -> int:
@@ -81,10 +81,10 @@ def window_start_for(occurred_at: datetime, window_size_seconds: int) -> datetim
     bucket boundaries - which is what makes the output reproducible.
     """
     if occurred_at.tzinfo is None:
-        occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+        occurred_at = occurred_at.replace(tzinfo=UTC)
     epoch_seconds = int(occurred_at.timestamp())
     bucket = epoch_seconds - (epoch_seconds % window_size_seconds)
-    return datetime.fromtimestamp(bucket, tz=timezone.utc)
+    return datetime.fromtimestamp(bucket, tz=UTC)
 
 
 class Aggregate(BaseModel):
@@ -129,7 +129,7 @@ class DeadLetter(BaseModel):
     offset: int
     key: str | None
     payload: str
-    failed_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    failed_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
 
     def as_row(self) -> dict[str, Any]:
         return self.model_dump()

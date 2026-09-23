@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import signal
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import FrameType
 from typing import Any
 
@@ -35,9 +35,6 @@ from orders_stream.dedup import Deduplicator
 from orders_stream.logging_conf import get_logger
 from orders_stream.metrics import Metrics, NullMetrics
 from orders_stream.processor.kafka_io import (
-    DlqPublisher,
-    consumer_config,
-    producer_config,
     to_raw_record,
 )
 from orders_stream.processor.pipeline import BatchProcessor, BatchResult, RawRecord
@@ -167,7 +164,7 @@ class ProcessorService:
         idle_for = time.monotonic() - self._last_record_at
         if idle_for < self.settings.watermark_idle_seconds:
             return
-        if self.windows.advance_on_idle(datetime.now(tz=timezone.utc)):
+        if self.windows.advance_on_idle(datetime.now(tz=UTC)):
             self._last_record_at = time.monotonic()
 
     def _accumulate(self, result: BatchResult) -> None:

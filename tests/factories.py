@@ -7,14 +7,14 @@ events with small differences, and a fixture per variation is unreadable.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from itertools import count
 from typing import Any
 
 from orders_stream.models import OrderEvent
 from orders_stream.processor.pipeline import RawRecord
 
-BASE_TIME = datetime(2026, 9, 14, 12, 0, 0, tzinfo=timezone.utc)
+BASE_TIME = datetime(2026, 9, 14, 12, 0, 0, tzinfo=UTC)
 _offsets = count()
 
 

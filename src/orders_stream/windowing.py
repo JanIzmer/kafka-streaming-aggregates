@@ -36,7 +36,7 @@ written out explicitly rather than left implicit in the code:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 from orders_stream.logging_conf import get_logger
@@ -95,10 +95,7 @@ class WindowDelta:
 
     @property
     def is_empty(self) -> bool:
-        return (
-            all(getattr(self, name) == 0 for name in ADDITIVE_FIELDS)
-            and not self.new_users
-        )
+        return all(getattr(self, name) == 0 for name in ADDITIVE_FIELDS) and not self.new_users
 
 
 @dataclass
@@ -126,8 +123,7 @@ class WindowState:
             new_users=tuple(sorted(self.users - self.flushed_users)),
             is_closed=current.is_closed,
             **{
-                name: getattr(current, name) - self.flushed.get(name, 0)
-                for name in ADDITIVE_FIELDS
+                name: getattr(current, name) - self.flushed.get(name, 0) for name in ADDITIVE_FIELDS
             },
         )
 
@@ -195,7 +191,7 @@ class WindowManager:
 
     def add(self, event: OrderEvent, now: datetime | None = None) -> Outcome:
         """Apply one event and report how it was treated."""
-        now = now or datetime.now(tz=timezone.utc)
+        now = now or datetime.now(tz=UTC)
 
         if event.occurred_at > now + timedelta(seconds=self.max_future_skew_seconds):
             self.future_skew_count += 1
@@ -296,9 +292,7 @@ class WindowManager:
 
     def pending_deltas(self) -> list[WindowDelta]:
         """What to send to the sink: one delta per changed window."""
-        deltas = [
-            state.delta(key) for key, state in self.windows.items() if state.dirty
-        ]
+        deltas = [state.delta(key) for key, state in self.windows.items() if state.dirty]
         return [delta for delta in deltas if not delta.is_empty or delta.is_closed]
 
     def mark_flushed(self, keys: list[WindowKey] | None = None) -> None:

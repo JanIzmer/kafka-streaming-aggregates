@@ -15,7 +15,7 @@ import json
 import os
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -103,7 +103,7 @@ def drain(settings, repository, seconds: float = 12.0):
 
 
 def base_payload(**overrides):
-    occurred = overrides.pop("occurred_at", datetime.now(tz=timezone.utc))
+    occurred = overrides.pop("occurred_at", datetime.now(tz=UTC))
     payload = {
         "event_id": str(uuid.uuid4()),
         "event_type": "order_paid",
@@ -166,7 +166,7 @@ def test_a_restart_does_not_double_apply(settings, repository):
 
 def test_a_too_late_event_lands_in_late_events(settings, repository):
     merchant = f"m_late_{uuid.uuid4().hex[:6]}"
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
 
     produce(
         settings,
