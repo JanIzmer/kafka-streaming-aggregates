@@ -10,4 +10,4 @@ typer==0.27.2
 # built fine and then died at startup on
 # 'Secondary flag is not valid for non-boolean flag'.
 click==8.5.0
-prometheus-client==0.21.0
+prometheus-client==0.26.0
